@@ -12,12 +12,14 @@ import (
 func TestGetPhonesByEmailPrefix(t *testing.T) {
 	cases := []struct {
 		EmailPrefix    string
+		ExpectedPrefix string
 		ExpectedPhones []*storage.FoundPhone
 		MockErr        error
 		ExpectedErr    error
 	}{
 		{
-			EmailPrefix: "aliddl",
+			EmailPrefix:    "aliddl",
+			ExpectedPrefix: "aliddl",
 			ExpectedPhones: []*storage.FoundPhone{
 				{
 					FirstName: "Alice",
@@ -29,7 +31,8 @@ func TestGetPhonesByEmailPrefix(t *testing.T) {
 			ExpectedErr: nil,
 		},
 		{
-			EmailPrefix: "ALiddl",
+			EmailPrefix:    "ALiddl",
+			ExpectedPrefix: "aliddl",
 			ExpectedPhones: []*storage.FoundPhone{
 				{
 					FirstName: "Alice",
@@ -47,6 +50,7 @@ func TestGetPhonesByEmailPrefix(t *testing.T) {
 		},
 		{
 			EmailPrefix:    "aliddl",
+			ExpectedPrefix: "aliddl",
 			ExpectedPhones: nil,
 			MockErr:        fmt.Errorf("some simple err"),
 			ExpectedErr:    ErrDBRequestFailed,
@@ -57,7 +61,7 @@ func TestGetPhonesByEmailPrefix(t *testing.T) {
 		t.Run(fmt.Sprintf("test case #%d", i), func(t *testing.T) {
 			mock := &dbMock{
 				t:              t,
-				expectedPrefix: tc.EmailPrefix,
+				expectedPrefix: tc.ExpectedPrefix,
 				expectedError:  tc.MockErr,
 				phonesToReturn: tc.ExpectedPhones,
 			}
@@ -111,3 +115,5 @@ func (db *dbMock) GetPhonesByEmailPrefix(ctx context.Context, prefix string) ([]
 	}
 	return db.phonesToReturn, db.expectedError
 }
+
+func (db *dbMock) Close() {}

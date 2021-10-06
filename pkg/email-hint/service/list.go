@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/SergeyShpak/gopher-corp-backend/pkg/email-hint/storage"
 )
@@ -16,7 +17,7 @@ func GetPhonesByEmailPrefix(db storage.DB, emailPrefix string) ([]*storage.Found
 	if len(emailPrefix) == 0 {
 		return nil, fmt.Errorf("%w: the passed prefix is empty", ErrIncorrectEmailPrefix)
 	}
-	phones, err := db.GetPhonesByEmailPrefix(context.Background(), emailPrefix)
+	phones, err := db.GetPhonesByEmailPrefix(context.Background(), strings.ToLower(emailPrefix))
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to get phones by email prefix: %v", ErrDBRequestFailed, err)
 	}

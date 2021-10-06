@@ -14,15 +14,18 @@ import (
 func TestGetPhonesByEmailPrefix(t *testing.T) {
 	cases := []struct {
 		EmailPrefix      string
+		ExpectedPrefix   string
 		MockErr          error
 		ExpectedRespCode int
 	}{
 		{
 			EmailPrefix:      "alidd",
+			ExpectedPrefix:   "alidd",
 			ExpectedRespCode: http.StatusOK,
 		},
 		{
 			EmailPrefix:      "ALidd",
+			ExpectedPrefix:   "alidd",
 			ExpectedRespCode: http.StatusOK,
 		},
 		{
@@ -31,6 +34,7 @@ func TestGetPhonesByEmailPrefix(t *testing.T) {
 		},
 		{
 			EmailPrefix:      "alidd",
+			ExpectedPrefix:   "alidd",
 			MockErr:          fmt.Errorf("some err"),
 			ExpectedRespCode: http.StatusInternalServerError,
 		},
@@ -48,7 +52,7 @@ func TestGetPhonesByEmailPrefix(t *testing.T) {
 			}
 			req = req.WithContext(context.WithValue(req.Context(), storage.ContextKeyDB, &dbMock{
 				t:              t,
-				expectedPrefix: tc.EmailPrefix,
+				expectedPrefix: tc.ExpectedPrefix,
 				expectedError:  tc.MockErr,
 				phonesToReturn: nil,
 			}))
@@ -82,3 +86,5 @@ func (db *dbMock) GetPhonesByEmailPrefix(ctx context.Context, prefix string) ([]
 	}
 	return db.phonesToReturn, db.expectedError
 }
+
+func (db *dbMock) Close() {}

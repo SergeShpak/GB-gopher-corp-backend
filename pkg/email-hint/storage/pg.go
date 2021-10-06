@@ -3,7 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
-	"os"
+	"net/url"
 	"sync"
 	"time"
 
@@ -16,7 +16,7 @@ const ContextKeyDB ContextKey = iota + 1
 
 var (
 	db    *pgxpool.Pool
-	dbMux *sync.Mutex
+	dbMux = &sync.Mutex{}
 )
 
 type FoundPhone struct {
@@ -27,10 +27,19 @@ type FoundPhone struct {
 
 type DB interface {
 	GetPhonesByEmailPrefix(ctx context.Context, prefix string) ([]*FoundPhone, error)
+	Close()
 }
 
-func NewDB() (DB, error) {
-	pool, err := getConn()
+type ConnString struct {
+	Host     string
+	Port     string
+	User     string
+	Password string
+	DBName   string
+}
+
+func NewDB(connStr *ConnString) (DB, error) {
+	pool, err := getConn(connStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get a connection pool: %w", err)
 	}
@@ -44,10 +53,34 @@ type conn struct {
 }
 
 func (c *conn) GetPhonesByEmailPrefix(ctx context.Context, prefix string) ([]*FoundPhone, error) {
-	return nil, nil
+	rows, err := c.db.Query(
+		context.Background(),
+		`SELECT first_name, last_name, phone
+		FROM employees
+		WHERE email LIKE '%' || $1 || '%'`,
+		prefix,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query failed: %w", err)
+	}
+	defer rows.Close()
+
+	phones := make([]*FoundPhone, 0)
+	for rows.Next() {
+		p := &FoundPhone{}
+		if err := rows.Scan(&p.FirstName, &p.LastName, &p.Phone); err != nil {
+			return nil, fmt.Errorf("failed to scan a received phone: %w", err)
+		}
+		phones = append(phones, p)
+	}
+	return phones, nil
 }
 
-func getConn() (*pgxpool.Pool, error) {
+func (c *conn) Close() {
+	c.db.Close()
+}
+
+func getConn(connStr *ConnString) (*pgxpool.Pool, error) {
 	dbMux.Lock()
 	defer dbMux.Unlock()
 	if db != nil {
@@ -55,15 +88,15 @@ func getConn() (*pgxpool.Pool, error) {
 	}
 
 	var err error
-	db, err = initPGXPool()
+	db, err = initPGXPool(connStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize a PGX pool: %w", err)
 	}
 	return db, nil
 }
 
-func initPGXPool() (*pgxpool.Pool, error) {
-	connStr, err := composeConnectionString()
+func initPGXPool(c *ConnString) (*pgxpool.Pool, error) {
+	connStr, err := composeConnectionString(c)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compose the connection string: %w", err)
 	}
@@ -87,41 +120,13 @@ func getPGXPoolConfig(connStr string) (*pgxpool.Config, error) {
 	return cfg, nil
 }
 
-const (
-	dbConnVarNameHost     = "DB_HOST"
-	dbConnVarNamePort     = "DB_PORT"
-	dbConnVarNameUser     = "DB_USER"
-	dbConnVarNamePassword = "DB_PASSWORD"
-	dbConnVarNameDBName   = "DB_NAME"
-)
-
-func composeConnectionString() (string, error) {
-	fnLookupVar := func(varName string) (string, error) {
-		val, ok := os.LookupEnv(varName)
-		if !ok {
-			return "", fmt.Errorf("variable %s is not defined", varName)
-		}
-		return val, nil
-	}
-	host, err := fnLookupVar(dbConnVarNameHost)
-	if err != nil {
-		return "", nil
-	}
-	port, err := fnLookupVar(dbConnVarNamePort)
-	if err != nil {
-		return "", nil
-	}
-	user, err := fnLookupVar(dbConnVarNameUser)
-	if err != nil {
-		return "", nil
-	}
-	password, err := fnLookupVar(dbConnVarNamePassword)
-	if err != nil {
-		return "", nil
-	}
-	dbName, err := fnLookupVar(dbConnVarNameDBName)
-	if err != nil {
-		return "", nil
-	}
-	return fmt.Sprintf("postgresql://%s:%s@%s:%s/%s", host, port, user, password, dbName), nil
+func composeConnectionString(c *ConnString) (string, error) {
+	return fmt.Sprintf(
+		"postgresql://%s:%s@%s:%s/%s",
+		url.QueryEscape(c.User),
+		url.QueryEscape(c.Password),
+		url.QueryEscape(c.Host),
+		url.QueryEscape(c.Port),
+		url.QueryEscape(c.DBName),
+	), nil
 }
