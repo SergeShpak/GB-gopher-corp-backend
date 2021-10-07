@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v4/log/logrusadapter"
 	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/sirupsen/logrus"
 )
 
 type ContextKey int
@@ -23,6 +26,7 @@ type FoundPhone struct {
 	FirstName string `json:"first_name"`
 	LastName  string `json:"last_name"`
 	Phone     string `phone:"phone"`
+	Email     string `email:"email"`
 }
 
 type DB interface {
@@ -39,13 +43,18 @@ type ConnString struct {
 }
 
 func NewDB(connStr *ConnString) (DB, error) {
-	pool, err := getConn(connStr)
+	// pool, err := getConn(connStr)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to get a connection pool: %w", err)
+	// }
+	// return &conn{
+	// 	db: pool,
+	// }, nil
+	gormDB, err := newGormDB(connStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get a connection pool: %w", err)
+		return nil, fmt.Errorf("failed to open a gorm connection: %w", err)
 	}
-	return &conn{
-		db: pool,
-	}, nil
+	return gormDB, nil
 }
 
 type conn struct {
@@ -55,9 +64,9 @@ type conn struct {
 func (c *conn) GetPhonesByEmailPrefix(ctx context.Context, prefix string) ([]*FoundPhone, error) {
 	rows, err := c.db.Query(
 		context.Background(),
-		`SELECT first_name, last_name, phone
+		`SELECT first_name, last_name, phone, email
 		FROM employees
-		WHERE email LIKE '%' || $1 || '%'`,
+		WHERE email LIKE $1 || '%'`,
 		prefix,
 	)
 	if err != nil {
@@ -68,7 +77,7 @@ func (c *conn) GetPhonesByEmailPrefix(ctx context.Context, prefix string) ([]*Fo
 	phones := make([]*FoundPhone, 0)
 	for rows.Next() {
 		p := &FoundPhone{}
-		if err := rows.Scan(&p.FirstName, &p.LastName, &p.Phone); err != nil {
+		if err := rows.Scan(&p.FirstName, &p.LastName, &p.Phone, &p.Email); err != nil {
 			return nil, fmt.Errorf("failed to scan a received phone: %w", err)
 		}
 		phones = append(phones, p)
@@ -91,6 +100,10 @@ func getConn(connStr *ConnString) (*pgxpool.Pool, error) {
 	db, err = initPGXPool(connStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize a PGX pool: %w", err)
+	}
+	if err := db.Ping(context.Background()); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to ping the DB: %w", err)
 	}
 	return db, nil
 }
@@ -117,6 +130,15 @@ func getPGXPoolConfig(connStr string) (*pgxpool.Config, error) {
 		return nil, fmt.Errorf("failed to create the PGX pool config from connection string: %w", err)
 	}
 	cfg.ConnConfig.ConnectTimeout = time.Second * 1
+	cfg.ConnConfig.Logger = logrusadapter.NewLogger(
+		&logrus.Logger{
+			Out:          os.Stdout,
+			Formatter:    new(logrus.JSONFormatter),
+			Hooks:        make(logrus.LevelHooks),
+			Level:        logrus.InfoLevel,
+			ExitFunc:     os.Exit,
+			ReportCaller: false,
+		})
 	return cfg, nil
 }
 
