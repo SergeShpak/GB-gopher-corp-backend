@@ -56,6 +56,8 @@ type setupResult struct {
 	PostgresContainer *dockertest.Resource
 }
 
+const dockerMaxWait = time.Second * 5
+
 func setup() (r *setupResult, err error) {
 	testFileDir, err := getTestFileDir()
 	if err != nil {
@@ -65,7 +67,7 @@ func setup() (r *setupResult, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create a new docketest pool: %w", err)
 	}
-	pool.MaxWait = time.Second * 5
+	pool.MaxWait = dockerMaxWait
 
 	postgresContainer, err := runPostgresContainer(pool, testFileDir)
 	if err != nil {
@@ -84,6 +86,12 @@ func setup() (r *setupResult, err error) {
 		return nil, fmt.Errorf("failed to run the migration container: %w", err)
 	}
 
+	defer func() {
+		if err := pool.Purge(migrationContainer); err != nil {
+			err = fmt.Errorf("failed to purge the migration container: %w", err)
+		}
+	}()
+
 	if err := pool.Retry(func() error {
 		err := prepopulateDB(testFileDir)
 		if err != nil {
@@ -92,10 +100,6 @@ func setup() (r *setupResult, err error) {
 		return err
 	}); err != nil {
 		return nil, fmt.Errorf("failed to prepopulate the DB: %w", err)
-	}
-
-	if err := pool.Purge(migrationContainer); err != nil {
-		return nil, fmt.Errorf("failed to purge the migration container: %w", err)
 	}
 
 	return &setupResult{
@@ -172,7 +176,7 @@ func runMigrationContainer(pool *dockertest.Pool, testFileDir string) (*dockerte
 				"-path=/migrations",
 				fmt.Sprintf(
 					"-database=%s",
-					composeConnectionStringForMigrations(),
+					composeConnectionString(),
 				),
 				"up",
 			},
@@ -187,6 +191,7 @@ func runMigrationContainer(pool *dockertest.Pool, testFileDir string) (*dockerte
 					Type:   "bind",
 				},
 			}
+			config.NetworkMode = "host"
 		},
 	)
 	if err != nil {
@@ -230,16 +235,19 @@ func TestGetPhonesByEmailPrefix(t *testing.T) {
 			FirstName: "Dale",
 			LastName:  "Cooper",
 			Phone:     "+72345",
+			Email:     "test_get_phones_by_email_prefix_dcooper@gopher_corp.com",
 		},
 		{
 			FirstName: "Bobby",
 			LastName:  "Briggs",
 			Phone:     "+73456",
+			Email:     "test_get_phones_by_email_prefix_bbriggs@gopher_corp.com",
 		},
 		{
 			FirstName: "Audrey",
 			LastName:  "Horne",
 			Phone:     "+74567",
+			Email:     "test_get_phones_by_email_prefix_ahorne@gopher_corp.com",
 		},
 	}
 	batch := &pgx.Batch{}
@@ -258,10 +266,10 @@ func TestGetPhonesByEmailPrefix(t *testing.T) {
 			e.LastName,
 			e.Phone,
 			fmt.Sprintf(
-				"%s_%s%s@goper_corp.com",
+				"%s_%s%s@gopher_corp.com",
 				emailTestPrefix,
 				string(strings.ToLower(e.FirstName)[0]),
-				strings.ToLower(e.LastName)[0:3],
+				strings.ToLower(e.LastName),
 			),
 		)
 	}
@@ -328,9 +336,5 @@ func getConnectionString() *storage.ConnString {
 }
 
 func composeConnectionString() string {
-	return fmt.Sprintf("postgresql://%s:%s@%s:%s/%s", DB_USER, url.QueryEscape(DB_PASSWORD), DB_HOST, DB_PORT, DB_NAME)
-}
-
-func composeConnectionStringForMigrations() string {
-	return fmt.Sprintf("postgresql://%s:%s@%s:%s/%s?sslmode=disable", DB_USER, url.QueryEscape(DB_PASSWORD), "172.17.0.2", "5432", DB_NAME)
+	return fmt.Sprintf("postgresql://%s:%s@%s:%s/%s?sslmode=disable", DB_USER, url.QueryEscape(DB_PASSWORD), DB_HOST, DB_PORT, DB_NAME)
 }
